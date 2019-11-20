@@ -1,0 +1,273 @@
+---
+title: "Lowly variable genes - Zeisel et al (normjam)"
+author: Catalina Vallejos
+output:
+  pdf_document: 
+    toc: yes
+  html_document:
+      code_folding: hide
+      toc: true
+      toc_float: 
+        collapsed: false
+      number_sections: true
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+This file uses the Zeisel et al dataset in order to identify genes that are 
+consistently lowly variable across different types of neurons. 
+
+Lowly variable genes (LVG) are identifying based on the overall relationship
+between mean and CV2, after `scran` normalisation. Residual logCV2 values are
+used to rank genes. Overlap of LVG across different neuron types are displayed. 
+
+This assumes the data is available at `data.path`.
+
+Disclaimer: not the cleanest (or most efficient) code!
+
+```{r}
+data.path <- "~/Documents/OneDrive/Projects/SingleCell/Datasets/Zeisel/OriginalFiles"
+```
+
+# Data preparation
+
+```{r creating_zeisel, eval=FALSE}
+zei <- read.table(file.path(data.path, "expression_mRNA_17-Aug-2014.txt"), 
+                  header=FALSE, stringsAsFactors=FALSE, row.names=1, 
+                  sep='\t', skip=11)[,-1]
+colnames(zei) <- paste0("zei_", seq_len(ncol(zei)))
+tmp <- read.table(file.path(data.path, "expression_mRNA_17-Aug-2014.txt"), 
+                  nrows=3, skip=7, sep='\t', stringsAsFactors = FALSE)
+tmp <- as.matrix(tmp[,-(1:2)])
+idx.astro <- which(tmp[2,]=="astrocytes_ependymal")
+idx.micro <- which(tmp[2,]=="microglia")
+idx.oligo <- which(tmp[2,]=="oligodendrocytes")
+save(zei, idx.astro, 
+     idx.micro, idx.oligo,
+     file=file.path("zeisel.RData"))
+```
+
+# Auxiliary functions
+
+```{r definitions, echo=FALSE, results="hide"}
+# gene filtering
+filter.genes<-function(raw.counts) {
+  #remove genes that are never expressed
+  keep<-(rowSums(raw.counts)>0)
+  raw.counts<-raw.counts[keep,]
+  Rpm<-apply(raw.counts, 2, function(x) 1e6*(x/sum(x)))   #rpm(RawCounts)$counts
+  Mean<-rowMeans(Rpm)
+  Select<-names(Mean)[which(Mean>median(Mean))]
+  
+  return(list(Select=Select, Mean=Mean))  
+}
+
+myLVG <- function(sce, perc = 0.01) {
+  
+  DF <- data.frame("Gene" = rownames(sce), 
+                   "Means" = rowMeans(normcounts(sce)),
+                   "CV2" = rowVars(normcounts(sce)) / (rowMeans(normcounts(sce)))^2)
+
+  with(DF, smoothScatter(log(Means), log(CV2), xlab = "log-Mean", ylab = "log-CV2"))
+  fit <- lm(log(CV2) ~ log(Means), data = DF)
+  abline(fit)
+  DF$ResLogCV2 <- log(DF$CV2) - predict(fit)
+  with(DF[which(DF$ResLogCV2 < quantile(DF$ResLogCV2, perc)),], 
+          points(log(Means), log(CV2), pch = 16, col = "red"))
+  
+  DF <- DF[order(DF$ResLogCV2), ]
+  return(DF)
+}
+
+# #Multiple set version of intersect, union and setdiff
+Intersect <- function (x) {  #x is a list
+  if (length(x) == 1) {
+    unlist(x)
+  } else if (length(x) == 2) {
+    intersect(x[[1]], x[[2]])
+  } else if (length(x) > 2){
+    intersect(x[[1]], Intersect(x[-1]))
+  }
+}
+
+IntersectTop <- function(MyList, n) {
+  
+  Intersect(lapply(MyList, function(x) x$Gene[seq_len(n)]))
+
+}
+```
+
+# Filtering genes
+
+```{r FilterAllCells}
+RawCounts0 <- zei
+filter0 <- filter.genes(RawCounts0)
+Select0 <- filter0$Select
+```
+
+```{r FilterTopZei1}
+RawCounts1 <- zei[,idx.astro]
+filter1 <- filter.genes(RawCounts1)
+Select1 <- filter1$Select
+```
+
+```{r FilterTopZei2}
+RawCounts2<-zei[,idx.oligo]
+filter2<-filter.genes(RawCounts2)
+Select2<-filter2$Select
+```
+
+```{r FilterTopZei3}
+RawCounts3<-zei[,idx.micro]
+filter3<-filter.genes(RawCounts3)
+Select3<-filter3$Select
+```
+
+```{r}
+MySelection <- Intersect(list(Select1, Select2, Select3))
+
+RawCountsZeiFilter0 <- RawCounts0[MySelection,]
+RawCountsZeiFilter1 <- RawCounts1[MySelection,]
+RawCountsZeiFilter2 <- RawCounts2[MySelection,]
+RawCountsZeiFilter3 <- RawCounts3[MySelection,]
+```
+
+# scran normalisation
+
+```{r scranAllCells}
+library(SingleCellExperiment)
+library(scran)
+sce0 <- SingleCellExperiment(assays = list(counts = as.matrix(RawCountsZeiFilter0)))
+# Average counts per cell, colour-coded by batch
+plot(colMeans(assay(sce0)), pch = 16)
+# Quick clusters
+clusters <- quickCluster(sce0)
+# Calculate cell-specific scaling factors
+sce0 <- computeSumFactors(sce0, clusters = clusters)
+plot(sizeFactors(sce0), pch = 16)
+# Apply the normalisation
+sce0 <- normalize(sce0, return_log = FALSE)
+# Average normalised count after normalisation
+plot(colMeans(normcounts(sce0)), pch = 16)
+```
+
+```{r scranZei1}
+sce1 <- SingleCellExperiment(assays = list(counts = as.matrix(RawCountsZeiFilter1)))
+# Average counts per cell, colour-coded by batch
+plot(colMeans(assay(sce1)), pch = 16)
+# Calculate cell-specific scaling factors
+sce1 <- computeSumFactors(sce1)
+plot(sizeFactors(sce1), pch = 16)
+# Apply the normalisation
+sce1 <- normalize(sce1, return_log = FALSE)
+# Average normalised count after normalisation
+plot(colMeans(normcounts(sce1)), pch = 16)
+```
+
+
+```{r scranZei2}
+sce2 <- SingleCellExperiment(assays = list(counts = as.matrix(RawCountsZeiFilter2)))
+# Average counts per cell, colour-coded by batch
+plot(colMeans(assay(sce2)), pch = 16)
+# Calculate cell-specific scaling factors
+sce2 <- computeSumFactors(sce2)
+plot(sizeFactors(sce2), pch = 16)
+# Apply the normalisation
+sce2 <- normalize(sce2, return_log = FALSE)
+# Average normalised count after normalisation
+plot(colMeans(normcounts(sce2)), pch = 16)
+```
+
+```{r scranZei3}
+sce3 <- SingleCellExperiment(assays = list(counts = as.matrix(RawCountsZeiFilter3)))
+# Average counts per cell, colour-coded by batch
+plot(colMeans(assay(sce3)), pch = 16)
+# Calculate cell-specific scaling factors
+sce3 <- computeSumFactors(sce3)
+plot(sizeFactors(sce3), pch = 16)
+# Apply the normalisation
+sce3 <- normalize(sce3, return_log = FALSE)
+# Average normalised count after normalisation
+plot(colMeans(normcounts(sce3)), pch = 16)
+```
+
+# LVG
+
+```{r }
+DF0 <- myLVG(sce0)
+DF1 <- myLVG(sce1)
+DF2 <- myLVG(sce2)
+DF3 <- myLVG(sce3)
+```
+
+
+```{r}
+sort(IntersectTop(list(DF1, DF2, DF3), n = 250))
+sort(IntersectTop(list(DF1, DF2, DF3), n = 500))
+sort(IntersectTop(list(DF1, DF2, DF3), n = 1000))
+write.table(sort(IntersectTop(list(DF1, DF2, DF3), n = 250)), 
+            file.path(data.path, "top250.txt"), 
+            row.names = FALSE, col.names = FALSE)
+write.table(sort(IntersectTop(list(DF1, DF2, DF3), n = 500)), 
+            file.path(data.path, "top500.txt"), 
+            row.names = FALSE, col.names = FALSE)
+write.table(sort(IntersectTop(list(DF1, DF2, DF3), n = 1000)), 
+            file.path(data.path, "top1000.txt"), 
+            row.names = FALSE, col.names = FALSE)
+
+length(sort(IntersectTop(list(DF1, DF2, DF3), n = 250)))
+length(sort(IntersectTop(list(DF1, DF2, DF3), n = 500)))
+length(sort(IntersectTop(list(DF1, DF2, DF3), n = 1000)))
+
+par(mfrow = c(1,3))
+with(DF0, smoothScatter(log(Means), log(CV2)))
+with(DF0[DF0$Gene %in% IntersectTop(list(DF1, DF2, DF3), n = 250), ],
+     points(log(Means), log(CV2), pch = 16, col = "red"))
+
+with(DF0, smoothScatter(log(Means), log(CV2)))
+with(DF0[DF0$Gene %in% IntersectTop(list(DF1, DF2, DF3), n = 500), ],
+     points(log(Means), log(CV2), pch = 16, col = "red"))
+
+with(DF0, smoothScatter(log(Means), log(CV2)))
+with(DF0[DF0$Gene %in% IntersectTop(list(DF1, DF2, DF3), n = 1000), ],
+     points(log(Means), log(CV2), pch = 16, col = "red"))
+```
+
+# Overlap with Angela's analysis
+
+FACS
+
+```{r}
+angela1 <- read.csv(file.path(data.path, "low_variance_FACS_Tabula_Muris_Senis.csv"))
+
+angela1_norm <- angela1$normalized_per_cell[angela1$normalized_per_cell != ""]
+angela1_scale_to_10 <- angela1$scale_to_10[angela1$scale_to_10 != ""]
+
+sort(Intersect(list(angela1_norm, IntersectTop(list(DF1, DF2, DF3), n = 500))))
+```
+
+10X
+
+```{r}
+angela2 <- read.csv(file.path(data.path, "low_variance_10X_Tabula_Muris_Senis.csv"))
+
+angela2_norm <- angela2$normalized_per_cell[angela2$normalized_per_cell != ""]
+
+sort(Intersect(list(angela2_norm, IntersectTop(list(DF1, DF2, DF3), n = 500))))
+```
+
+# Overlap with Rahul
+
+```{r}
+rahul <- read.table(file.path(data.path, "sctransform_1000_lvg.txt"))[,1]
+rahul <- tolower(rahul)
+length(rahul)
+
+sort(Intersect(list(rahul, tolower(angela2_norm), 
+                    tolower(IntersectTop(list(DF1, DF2, DF3), n = 500)))))
+```
