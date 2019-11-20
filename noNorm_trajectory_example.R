@@ -20,32 +20,42 @@ rdat.norm2 <- runPCA(rdat.norm2)
 set.seed(99)
 rdat.norm2 <- runUMAP(rdat.norm2)
 
-plotReducedDim(rdat, use_dimred = "UMAP", colour_by="log10_total_counts")
-plotReducedDim(rdat.norm2, use_dimred = "UMAP", colour_by="log10_total_counts")
+p1 <- plotReducedDim(rdat, use_dimred = "UMAP", colour_by="log10_total_counts")
+p2 <- plotReducedDim(rdat.norm2, use_dimred = "UMAP", colour_by="log10_total_counts")
 
+library(gridExtra)
+pdf("fulldata_umap.pdf", height=3, width=8)
+grid.arrange(p1, p2, nrow = 1)
+dev.off()
 ### Focus on a specific cluster to show the trajectory
 
-subt <- rdat[,which(rdat@reducedDims$UMAP[,1] > -5 & rdat@reducedDims$UMAP[,2] > 10)]
+sdat <- rdat[,which(rdat@reducedDims$UMAP[,1] > -5 & rdat@reducedDims$UMAP[,2] > 10)]
 dim(subt)
 set.seed(99)
 sdat <- runPCA(sdat)
 sdat <- runUMAP(sdat)
-plotReducedDim(sdat, use_dimred = "UMAP", colour_by="log10_total_counts")
+p1 <- plotReducedDim(sdat, use_dimred = "UMAP", colour_by="log10_total_counts")
 
 library(scran)
 sdat.norm2 <- rdat.norm2[,which(rdat@reducedDims$UMAP[,1] > -5 & rdat@reducedDims$UMAP[,2] > 10)]
 sdat.norm2 <- runPCA(sdat.norm2)
 set.seed(99)
 sdat.norm2 <- runUMAP(sdat.norm2)
-plotReducedDim(sdat.norm2, use_dimred = "UMAP", colour_by="log10_total_counts")
+p2 <- plotReducedDim(sdat.norm2, use_dimred = "UMAP", colour_by="log10_total_counts")
+
+
+library(gridExtra)
+pdf("subdata_umap.pdf", height=3, width=8)
+grid.arrange(p1, p2, nrow = 1)
+dev.off()
 
 library(slingshot)
 sdat.sling <- slingshot(sdat, reducedDim = 'UMAP')
 XX = plotReducedDim(sdat, use_dimred = "UMAP", colour_by="log10_total_counts")
 CURVE = data.frame(SlingshotDataSet(sdat.sling)@curves$curve1$s)
 colnames(CURVE) <- c("x", "y")
-CURVE <- CURVE[SlingshotDataSet(sdat.norm2.sling)@curves$curve1$ord,]
-XX + geom_segment(CURVE, mapping = aes(x = x, xend = dplyr::lead(x), y = y, yend = dplyr::lead(y)), 
+CURVE <- CURVE[SlingshotDataSet(sdat.sling)@curves$curve1$ord,]
+p1 <- XX + geom_segment(CURVE, mapping = aes(x = x, xend = dplyr::lead(x), y = y, yend = dplyr::lead(y)), 
                   size = 0.5, color='black')
 
 
@@ -57,10 +67,16 @@ CURVE.norm = data.frame(SlingshotDataSet(sdat.norm2.sling)@curves$curve1$s)
 colnames(CURVE.norm) <- c("x", "y")
 CURVE.norm <- CURVE.norm[SlingshotDataSet(sdat.norm2.sling)@curves$curve1$ord,]
 CURVE.norm <- unique(CURVE.norm)
-XX + geom_segment(CURVE.norm, mapping = aes(x = x, 
+p2 <- XX + geom_segment(CURVE.norm, mapping = aes(x = x, 
                                           xend = dplyr::lead(x), 
                                           y = y, yend = dplyr::lead(y)), 
                   size = 0.5, color='black')
+
+
+pdf("subdata_slingshot.pdf", height=3, width=8)
+grid.arrange(p1, p2, nrow = 1)
+dev.off()
+
 plot(reducedDims(sdat.norm2.sling)$UMAP,  asp = 1, pch = 16)
 lines(SlingshotDataSet(sdat.norm2.sling), lwd = 3, col = 'black')
 
